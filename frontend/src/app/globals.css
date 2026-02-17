@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-50: #eff6ff;
+  --primary-100: #dbeafe;
+  --primary-200: #bfdbfe;
+  --primary-300: #93c5fd;
+  --primary-400: #60a5fa;
+  --primary-500: #3b82f6;
+  --primary-600: #2563eb;
+  --primary-700: #1d4ed8;
+  --primary-800: #1e40af;
+  --primary-900: #1e3a8a;
+
+  --bg: #ffffff;
+  --bg-secondary: #f8fafc;
+  --text: #0f172a;
+  --text-secondary: #475569;
+  --border: #e2e8f0;
+  --card-bg: #ffffff;
+}
+
+.dark {
+  --bg: #0f172a;
+  --bg-secondary: #1e293b;
+  --text: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --border: #334155;
+  --card-bg: #1e293b;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors;
+    background-color: var(--primary-600);
+  }
+
+  .btn-primary:hover {
+    background-color: var(--primary-700);
+  }
+
+  .btn-primary:focus-visible {
+    @apply outline outline-2 outline-offset-2;
+    outline-color: var(--primary-600);
+  }
+
+  .btn-primary:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  .btn-secondary {
+    @apply rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition-colors;
+    border: 1px solid var(--border);
+    background-color: var(--card-bg);
+    color: var(--text);
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--bg-secondary);
+  }
+
+  .btn-secondary:focus-visible {
+    @apply outline outline-2 outline-offset-2;
+  }
+
+  .card {
+    @apply rounded-xl p-6 shadow-sm;
+    border: 1px solid var(--border);
+    background-color: var(--card-bg);
+  }
+
+  .input {
+    @apply block w-full rounded-lg px-3 py-2.5 text-sm shadow-sm;
+    border: 1px solid var(--border);
+    background-color: var(--card-bg);
+    color: var(--text);
+  }
+
+  .input::placeholder {
+    color: var(--text-secondary);
+  }
+
+  .input:focus {
+    border-color: var(--primary-500);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  }
+}

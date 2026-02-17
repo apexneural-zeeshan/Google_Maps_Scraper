@@ -1,0 +1,20 @@
+[project]
+name = "gmaps-scraper-backend"
+version = "0.1.0"
+description = "Google Maps Scraper — FastAPI Backend"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 99
+
+[tool.ruff.lint]
+ignore = ["B008", "SIM105"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/models/*.py" = ["F821"]

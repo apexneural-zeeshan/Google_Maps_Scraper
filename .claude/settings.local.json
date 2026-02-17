@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venvScriptspip install -r requirements.txt)",
+      "Bash(./venv/Scripts/ruff.exe check:*)",
+      "Bash(node -e:*)"
+    ]
+  }
+}

@@ -1,0 +1,68 @@
+import pytest
+
+
+@pytest.fixture
+def sample_leads() -> list[dict]:
+    """Sample lead data for testing deduplication and processing."""
+    return [
+        {
+            "place_id": "ChIJ_abc123",
+            "name": "Joe's Pizza",
+            "address": "123 Main St, Austin, TX 78701",
+            "phone": "+1-512-555-0100",
+            "website": "https://joespizza.com",
+            "rating": 4.5,
+            "review_count": 120,
+            "types": ["restaurant", "pizza_restaurant"],
+            "business_type": "restaurant",
+            "latitude": 30.2672,
+            "longitude": -97.7431,
+            "opening_hours": None,
+            "photos": [],
+            "price_level": 2,
+            "business_status": "OPERATIONAL",
+            "maps_url": "https://maps.google.com/?cid=123",
+            "source": "playwright",
+            "raw_data": {},
+        },
+        {
+            "place_id": "ChIJ_def456",
+            "name": "Tacos El Rancho",
+            "address": "456 South Congress Ave, Austin, TX 78704",
+            "phone": "+1-512-555-0200",
+            "website": None,
+            "rating": 4.8,
+            "review_count": 350,
+            "types": ["restaurant", "mexican_restaurant"],
+            "business_type": "restaurant",
+            "latitude": 30.2500,
+            "longitude": -97.7500,
+            "opening_hours": None,
+            "photos": [],
+            "price_level": 1,
+            "business_status": "OPERATIONAL",
+            "maps_url": "https://maps.google.com/?cid=456",
+            "source": "playwright",
+            "raw_data": {},
+        },
+        {
+            "place_id": "ChIJ_abc123",  # Duplicate of Joe's Pizza
+            "name": "Joe's Pizza Restaurant",
+            "address": "123 Main St, Austin, TX 78701",
+            "phone": "+1-512-555-0100",
+            "website": "https://joespizza.com",
+            "rating": 4.5,
+            "review_count": 118,
+            "types": ["restaurant"],
+            "business_type": "restaurant",
+            "latitude": 30.2672,
+            "longitude": -97.7431,
+            "opening_hours": {"text": "Mon-Sun 11am-10pm"},
+            "photos": [{"url": "https://example.com/photo.jpg"}],
+            "price_level": None,
+            "business_status": None,
+            "maps_url": None,
+            "source": "serp_api",
+            "raw_data": {},
+        },
+    ]
