@@ -3,26 +3,63 @@
 Launches headless Chromium, navigates to Google Maps search results,
 scrolls to load listings, and extracts business data from the results panel
 and optionally from individual listing detail pages.
+
+Features:
+- Auto-retry per grid cell (3 attempts with exponential backoff)
+- Browser lifecycle management (restart after 50 detail pages)
+- Random delays between detail page visits (anti-detection)
+- Realistic user agent and viewport
 """
 
 import asyncio
 import hashlib
 import logging
+import random
 import re
 import urllib.parse
 
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import Page, Browser, BrowserContext, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Delay between visiting detail pages to avoid rate limiting
-DETAIL_PAGE_DELAY = 2.0
+# Delay between visiting detail pages (randomized for anti-detection)
+DETAIL_PAGE_DELAY_MIN = 3.0
+DETAIL_PAGE_DELAY_MAX = 8.0
 
 # Max time to wait for selectors (ms)
 SELECTOR_TIMEOUT = 8000
+
+# Chromium launch args to reduce memory usage (~2.8 GB Docker host)
+CHROMIUM_ARGS = [
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-extensions",
+    "--disable-plugins",
+    "--single-process",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--disable-translate",
+    "--no-first-run",
+    "--disable-features=site-per-process",
+]
+
+# Retry config per grid cell
+MAX_CELL_RETRIES = 3
+RETRY_BACKOFF_BASE = 5  # seconds: 5, 15, 45
+
+# Realistic user agents (rotated)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+]
 
 
 def _build_search_url(keyword: str, location: str, lat: float, lng: float, zoom: int = 14) -> str:
@@ -55,11 +92,24 @@ def _parse_rating_text(text: str) -> tuple[float | None, int | None]:
     return rating, count
 
 
-async def _scroll_results_panel(page: Page, max_scrolls: int = 5) -> None:
-    """Scroll the results feed to load more listings.
+async def _create_browser_context(
+    p,
+) -> tuple[Browser, BrowserContext]:
+    """Create a fresh browser and context with randomized fingerprint."""
+    browser = await p.chromium.launch(
+        headless=settings.playwright_headless,
+        args=CHROMIUM_ARGS,
+    )
+    context = await browser.new_context(
+        viewport={"width": 1280, "height": 900},
+        locale="en-US",
+        user_agent=random.choice(USER_AGENTS),
+    )
+    return browser, context
 
-    Scrolls the results panel div[role='feed'] and waits for new items.
-    """
+
+async def _scroll_results_panel(page: Page, max_scrolls: int = 5) -> None:
+    """Scroll the results feed to load more listings."""
     feed = page.locator('div[role="feed"]')
 
     try:
@@ -69,10 +119,8 @@ async def _scroll_results_panel(page: Page, max_scrolls: int = 5) -> None:
         return
 
     for scroll_num in range(max_scrolls):
-        # Count current items
         items_before = await page.locator('div[role="feed"] > div > div[jsaction]').count()
 
-        # Scroll to bottom of feed
         await feed.evaluate("el => el.scrollTop = el.scrollHeight")
         await asyncio.sleep(1.5)
 
@@ -80,14 +128,12 @@ async def _scroll_results_panel(page: Page, max_scrolls: int = 5) -> None:
 
         logger.debug("Scroll %d: %d → %d items", scroll_num + 1, items_before, items_after)
 
-        # Check for "end of results" indicator
         end_marker = page.locator('p.fontBodyMedium span:has-text("end of results")')
         if await end_marker.count() > 0:
             logger.debug("Reached end of results")
             break
 
         if items_after == items_before:
-            # No new items loaded — might be at the end
             await asyncio.sleep(1.0)
             items_final = await page.locator('div[role="feed"] > div > div[jsaction]').count()
             if items_final == items_before:
@@ -98,7 +144,6 @@ async def _extract_listings_from_feed(page: Page) -> list[dict]:
     """Extract listing data from the results feed panel."""
     listings: list[dict] = []
 
-    # Each listing is an anchor tag within the feed
     links = page.locator('div[role="feed"] a[href*="/maps/place/"]')
     count = await links.count()
 
@@ -113,18 +158,14 @@ async def _extract_listings_from_feed(page: Page) -> list[dict]:
             if not aria_label:
                 continue
 
-            # The parent container has additional info
             container = link.locator("xpath=ancestor::div[contains(@jsaction, 'mouseover')]").first
 
-            # Extract category/type
             category = ""
             category_els = container.locator('div.fontBodyMedium > div > span > span')
             if await category_els.count() > 0:
                 category = (await category_els.first.inner_text()).strip()
-                # Clean up common patterns like "· Restaurant" or "Restaurant · $$"
                 category = re.sub(r"^[·\s]+|[·\s]+$", "", category)
 
-            # Extract rating and review count from the aria-label or nearby elements
             rating = None
             review_count = None
             rating_el = container.locator('span[role="img"]')
@@ -132,13 +173,11 @@ async def _extract_listings_from_feed(page: Page) -> list[dict]:
                 rating_label = await rating_el.first.get_attribute("aria-label") or ""
                 rating, review_count = _parse_rating_text(rating_label)
 
-            # Extract address — usually the last line of text in the container
             address = ""
             address_candidates = container.locator('div.fontBodyMedium > div:not(:first-child)')
             addr_count = await address_candidates.count()
             if addr_count > 0:
                 last_text = (await address_candidates.last.inner_text()).strip()
-                # Address lines typically start with a number or contain comma-separated parts
                 if last_text and not last_text.startswith("Open") and not last_text.startswith("Closed"):
                     address = last_text
 
@@ -159,20 +198,26 @@ async def _extract_listings_from_feed(page: Page) -> list[dict]:
                 "price_level": None,
                 "business_status": None,
                 "maps_url": href,
+                "description": None,
+                "verified": None,
+                "reviews_per_score": None,
+                "primary_email": None,
+                "emails": None,
+                "social_links": None,
+                "owner_name": None,
+                "employee_count": None,
+                "year_established": None,
+                "business_age_years": None,
                 "source": "playwright",
                 "raw_data": {"aria_label": aria_label, "href": href},
             }
 
-            # Try to extract place_id from the URL
-            # Google Maps URLs embed place IDs as hex CIDs (0x...) or
-            # ChIJ... tokens in the data parameter or path segments
             place_id_match = re.search(r"(0x[0-9a-fA-F]+:0x[0-9a-fA-F]+)", href)
             if not place_id_match:
                 place_id_match = re.search(r"(ChIJ[A-Za-z0-9_-]+)", href)
             if place_id_match:
                 listing["place_id"] = place_id_match.group(1)
 
-            # Try to extract lat/lng from the URL
             coord_match = re.search(r"@(-?\d+\.?\d*),(-?\d+\.?\d*)", href)
             if coord_match:
                 listing["latitude"] = float(coord_match.group(1))
@@ -188,19 +233,18 @@ async def _extract_listings_from_feed(page: Page) -> list[dict]:
 
 
 async def _scrape_detail_page(page: Page, listing: dict) -> dict:
-    """Visit a listing's detail page and scrape additional data.
-
-    Enriches the listing dict with: phone, website, full address, hours, price_level.
-    """
+    """Visit a listing's detail page and scrape additional data."""
     url = listing.get("maps_url", "")
     if not url:
         return listing
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-        await asyncio.sleep(DETAIL_PAGE_DELAY)
 
-        # Wait for the detail panel to appear
+        # Randomized delay for anti-detection
+        delay = random.uniform(DETAIL_PAGE_DELAY_MIN, DETAIL_PAGE_DELAY_MAX)
+        await asyncio.sleep(delay)
+
         await page.wait_for_selector('div[role="main"]', timeout=SELECTOR_TIMEOUT)
 
         # Phone number
@@ -228,7 +272,7 @@ async def _scrape_detail_page(page: Page, listing: dict) -> dict:
             if hours_text:
                 listing["opening_hours"] = {"text": hours_text}
 
-        # Price level (from category area: "$" to "$$$$")
+        # Price level
         category_el = page.locator('button[jsaction*="category"]')
         if await category_el.count() > 0:
             cat_text = (await category_el.first.inner_text()).strip()
@@ -236,7 +280,7 @@ async def _scrape_detail_page(page: Page, listing: dict) -> dict:
             if dollar_match:
                 listing["price_level"] = len(dollar_match.group(1))
 
-        # Place ID from the current URL
+        # Place ID from current URL
         current_url = page.url
         place_id_match = re.search(r"(0x[0-9a-fA-F]+:0x[0-9a-fA-F]+)", current_url)
         if not place_id_match:
@@ -250,6 +294,38 @@ async def _scrape_detail_page(page: Page, listing: dict) -> dict:
             listing["latitude"] = float(coord_match.group(1))
             listing["longitude"] = float(coord_match.group(2))
 
+        # Description
+        about_el = page.locator('div.PYvSYb, div[class*="editorial"] span')
+        if await about_el.count() > 0:
+            desc_text = (await about_el.first.inner_text()).strip()
+            if desc_text and len(desc_text) > 10:
+                listing["description"] = desc_text
+
+        # Verified badge
+        verified_el = page.locator('span:has-text("Claimed"), span:has-text("Verified")')
+        if await verified_el.count() > 0:
+            listing["verified"] = True
+
+        # Reviews per score
+        reviews_per_score: dict[str, int] = {}
+        for star in range(1, 6):
+            star_el = page.locator(f'tr[aria-label*="{star} star"]')
+            if await star_el.count() > 0:
+                label = await star_el.first.get_attribute("aria-label") or ""
+                count_match = re.search(r"(\d[\d,]*)\s*review", label)
+                if count_match:
+                    reviews_per_score[str(star)] = int(count_match.group(1).replace(",", ""))
+        if reviews_per_score:
+            listing["reviews_per_score"] = reviews_per_score
+
+        # Owner
+        owner_el = page.locator('span:has-text("Managed by"), span:has-text("Owner")')
+        if await owner_el.count() > 0:
+            owner_text = (await owner_el.first.inner_text()).strip()
+            owner_text = re.sub(r"^(Managed by|Owner:?)\s*", "", owner_text).strip()
+            if owner_text:
+                listing["owner_name"] = owner_text
+
         logger.debug("Scraped detail: %s (phone=%s, website=%s)", listing["name"], listing["phone"], listing["website"])
 
     except PlaywrightTimeout:
@@ -260,114 +336,188 @@ async def _scrape_detail_page(page: Page, listing: dict) -> dict:
     return listing
 
 
-async def scrape_google_maps(
+async def _scrape_single_cell(
+    p,
     keyword: str,
     location: str,
     latitude: float,
     longitude: float,
-    max_results: int = 60,
-    scrape_details: bool | None = None,
-    zoom: int = 14,
+    max_results: int,
+    detail_limit: int | None,
+    zoom: int,
 ) -> tuple[list[dict], int]:
-    """Scrape Google Maps search results using Playwright.
+    """Scrape a single grid cell with retry and fresh browser per attempt.
 
-    This is the PRIMARY data source — free, self-hosted, no API key needed.
+    A new browser is launched per attempt and closed when done, to keep
+    memory usage low on constrained Docker hosts (~2.8 GB RAM).
 
     Args:
-        keyword: Business type or search term (e.g., "restaurants").
-        location: Location description (e.g., "Austin, TX").
-        latitude: Center latitude for the search.
-        longitude: Center longitude for the search.
-        max_results: Maximum number of listings to extract.
-        scrape_details: Whether to visit each listing's detail page for
-            phone/website/hours. Defaults to settings.playwright_scrape_details.
-        zoom: Google Maps zoom level.
+        detail_limit: Max detail pages to scrape per cell.
+            None = scrape all, 0 = skip details entirely.
 
-    Returns:
-        Tuple of (list of parsed listing dicts, number of pages scraped).
+    Returns (listings, pages_scraped).
     """
-    if scrape_details is None:
-        scrape_details = settings.playwright_scrape_details
-
-    search_url = _build_search_url(keyword, location, latitude, longitude, zoom)
-    pages_scraped = 0
-    listings: list[dict] = []
-
-    logger.info("Playwright scraping: '%s' in '%s' at (%.4f, %.4f)", keyword, location, latitude, longitude)
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=settings.playwright_headless)
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 900},
-            locale="en-US",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-        )
-        page = await context.new_page()
-
+    for attempt in range(MAX_CELL_RETRIES):
+        browser = None
         try:
-            # Navigate to Google Maps search
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-            pages_scraped += 1
+            browser, context = await _create_browser_context(p)
+            page = await context.new_page()
 
-            # Handle consent dialog if it appears
+            search_url = _build_search_url(
+                keyword, location, latitude, longitude, zoom,
+            )
+            await page.goto(
+                search_url, wait_until="domcontentloaded", timeout=30000,
+            )
+
+            # Handle consent dialog
             try:
-                consent_btn = page.locator('button:has-text("Accept all")')
+                consent_btn = page.locator(
+                    'button:has-text("Accept all")',
+                )
                 if await consent_btn.count() > 0:
                     await consent_btn.first.click()
                     await asyncio.sleep(1.0)
             except Exception:
                 pass
 
-            # Wait for results to load
+            # Wait for results
             try:
-                await page.wait_for_selector('div[role="feed"]', timeout=15000)
+                await page.wait_for_selector(
+                    'div[role="feed"]', timeout=15000,
+                )
             except PlaywrightTimeout:
-                logger.warning("No results feed found for '%s' in '%s'", keyword, location)
-                await browser.close()
-                return [], pages_scraped
+                logger.warning(
+                    "No results feed for '%s' at (%.4f, %.4f)",
+                    keyword, latitude, longitude,
+                )
+                return [], 1
 
-            # Scroll to load more results
-            max_scrolls = max(1, max_results // 15)  # ~15 results per scroll
-            await _scroll_results_panel(page, max_scrolls=min(max_scrolls, 8))
+            max_scrolls = max(1, max_results // 15)
+            await _scroll_results_panel(
+                page, max_scrolls=min(max_scrolls, 8),
+            )
 
-            # Extract listings from the feed
             listings = await _extract_listings_from_feed(page)
-
-            # Trim to max_results
             listings = listings[:max_results]
 
-            logger.info("Extracted %d listings from feed", len(listings))
+            logger.info(
+                "Extracted %d listings from feed", len(listings),
+            )
 
-            # Optionally scrape detail pages for each listing
-            if scrape_details and listings:
-                logger.info("Scraping detail pages for %d listings...", len(listings))
-                for i, listing in enumerate(listings):
-                    listing = await _scrape_detail_page(page, listing)
-                    listings[i] = listing
+            # Close the feed page to free memory before details
+            await page.close()
+
+            # Scrape detail pages (one page at a time, close after each)
+            should_scrape = (
+                detail_limit is None or detail_limit > 0
+            ) and listings
+            if should_scrape:
+                cap = len(listings)
+                if detail_limit is not None:
+                    cap = min(cap, detail_limit)
+                logger.info(
+                    "Scraping %d/%d detail pages...",
+                    cap, len(listings),
+                )
+
+                for i in range(cap):
+                    detail_page = await context.new_page()
+                    listings[i] = await _scrape_detail_page(
+                        detail_page, listings[i],
+                    )
+                    await detail_page.close()
 
                     if (i + 1) % 10 == 0:
-                        logger.info("Detail scrape progress: %d/%d", i + 1, len(listings))
+                        logger.info(
+                            "Detail progress: %d/%d", i + 1, cap,
+                        )
+
+            # Ensure place_ids
+            for listing in listings:
+                if not listing.get("place_id"):
+                    identity = (
+                        f"{listing.get('name', '')}|"
+                        f"{listing.get('address', '')}|"
+                        f"{listing.get('maps_url', '')}"
+                    )
+                    digest = hashlib.sha256(
+                        identity.encode(),
+                    ).hexdigest()[:16]
+                    listing["place_id"] = f"pw_{digest}"
+
+            return listings, 1
 
         except Exception as e:
-            logger.error("Playwright scraping failed: %s", e)
-        finally:
-            await browser.close()
+            backoff = RETRY_BACKOFF_BASE * (3 ** attempt)
+            logger.warning(
+                "Cell (%.4f, %.4f) attempt %d/%d failed: %s."
+                " Retrying in %ds...",
+                latitude, longitude,
+                attempt + 1, MAX_CELL_RETRIES, e, backoff,
+            )
+            if attempt < MAX_CELL_RETRIES - 1:
+                await asyncio.sleep(backoff)
+            else:
+                logger.error(
+                    "Cell (%.4f, %.4f) failed after %d attempts",
+                    latitude, longitude, MAX_CELL_RETRIES,
+                )
+                return [], 1
 
-    # Ensure all listings have a place_id (generate one if missing)
-    for listing in listings:
-        if not listing.get("place_id"):
-            # Create a deterministic ID from name + address + maps_url
-            # Using hashlib (not hash()) so the result is stable across runs
-            identity = f"{listing.get('name', '')}|{listing.get('address', '')}|{listing.get('maps_url', '')}"
-            digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
-            listing["place_id"] = f"pw_{digest}"
+        finally:
+            if browser:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
+    return [], 1
+
+
+async def scrape_google_maps(
+    keyword: str,
+    location: str,
+    latitude: float,
+    longitude: float,
+    max_results: int = 60,
+    detail_limit: int | None = None,
+    zoom: int = 14,
+) -> tuple[list[dict], int]:
+    """Scrape Google Maps search results using Playwright.
+
+    This is the PRIMARY data source — free, self-hosted, no API key.
+
+    Args:
+        keyword: Business type or search term.
+        location: Location description (e.g., "Austin, TX").
+        latitude: Center latitude for the search.
+        longitude: Center longitude for the search.
+        max_results: Maximum number of listings to extract.
+        detail_limit: Max detail pages to scrape per cell.
+            None = scrape all (small jobs), 0 = skip details.
+        zoom: Google Maps zoom level.
+
+    Returns:
+        Tuple of (list of listing dicts, pages scraped count).
+    """
+    # Default: respect global setting if detail_limit not specified
+    if detail_limit is None and not settings.playwright_scrape_details:
+        detail_limit = 0
 
     logger.info(
-        "Playwright scrape complete: %d listings, details=%s",
-        len(listings), scrape_details,
+        "Playwright scraping: '%s' in '%s' at (%.4f, %.4f)"
+        " detail_limit=%s",
+        keyword, location, latitude, longitude, detail_limit,
+    )
+
+    async with async_playwright() as p:
+        listings, pages_scraped = await _scrape_single_cell(
+            p, keyword, location, latitude, longitude,
+            max_results, detail_limit, zoom,
+        )
+
+    logger.info(
+        "Playwright scrape complete: %d listings", len(listings),
     )
     return listings, pages_scraped

@@ -17,6 +17,7 @@ export default function ScrapeForm({ onSubmit, loading }: ScrapeFormProps) {
   const [radiusKm, setRadiusKm] = useState(5);
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
+  const [userEmail, setUserEmail] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +32,7 @@ export default function ScrapeForm({ onSubmit, loading }: ScrapeFormProps) {
       radius_km: radiusKm,
       latitude: locationType === "coordinates" ? parseFloat(latitude) : null,
       longitude: locationType === "coordinates" ? parseFloat(longitude) : null,
+      user_email: userEmail.trim() || null,
     };
 
     onSubmit(payload);
@@ -169,6 +171,23 @@ export default function ScrapeForm({ onSubmit, loading }: ScrapeFormProps) {
           <span>1 km</span>
           <span>50 km</span>
         </div>
+      </div>
+
+      <div>
+        <label
+          htmlFor="email"
+          className="mb-1.5 block text-sm font-medium text-[var(--text)]"
+        >
+          Email <span className="text-[var(--text-secondary)]">(optional)</span>
+        </label>
+        <input
+          id="email"
+          type="email"
+          className="input"
+          placeholder="your@email.com — get notified when done"
+          value={userEmail}
+          onChange={(e) => setUserEmail(e.target.value)}
+        />
       </div>
 
       <button

@@ -58,6 +58,14 @@ def _parse_serp_result(result: dict) -> dict:
     """Parse a SerpAPI google_maps result into our standard lead format."""
     gps = result.get("gps_coordinates", {})
 
+    # Build types list from both "type" and "types" fields
+    types: list[str] = []
+    if result.get("type"):
+        types.append(result["type"])
+    for t in result.get("types", []):
+        if t and t not in types:
+            types.append(t)
+
     return {
         "place_id": result.get("place_id", result.get("data_id", "")),
         "name": result.get("title", "Unknown"),
@@ -66,7 +74,7 @@ def _parse_serp_result(result: dict) -> dict:
         "website": result.get("website"),
         "rating": result.get("rating"),
         "review_count": result.get("reviews"),
-        "types": [result.get("type", "")].copy() if result.get("type") else [],
+        "types": types,
         "business_type": result.get("type"),
         "latitude": gps.get("latitude"),
         "longitude": gps.get("longitude"),
@@ -75,6 +83,16 @@ def _parse_serp_result(result: dict) -> dict:
         "price_level": None,
         "business_status": None,
         "maps_url": result.get("place_id_search"),
+        "description": result.get("description"),
+        "verified": result.get("verified"),
+        "reviews_per_score": result.get("reviews_per_score"),
+        "primary_email": None,
+        "emails": None,
+        "social_links": None,
+        "owner_name": None,
+        "employee_count": None,
+        "year_established": None,
+        "business_age_years": None,
         "source": "serp_api",
         "raw_data": result,
     }

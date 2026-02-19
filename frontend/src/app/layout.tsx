@@ -36,6 +36,18 @@ export default function RootLayout({
               >
                 New Scrape
               </Link>
+              <Link
+                href="/batch"
+                className="text-sm font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+              >
+                Batch Scrape
+              </Link>
+              <Link
+                href="/jobs"
+                className="text-sm font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+              >
+                My Jobs
+              </Link>
               <a
                 href="/api/docs"
                 target="_blank"

@@ -11,6 +11,7 @@ export interface JobCreatePayload {
   radius_km: number;
   latitude?: number | null;
   longitude?: number | null;
+  user_email?: string | null;
 }
 
 export interface JobResponse {
@@ -22,10 +23,20 @@ export interface JobResponse {
   radius_km: number;
   latitude: number | null;
   longitude: number | null;
+  user_email: string | null;
+  batch_id: string | null;
   progress: number;
   current_step: string | null;
   total_found: number;
   total_unique: number;
+  // Layer statuses
+  layer1_status: string;
+  layer1_completed_at: string | null;
+  layer2_status: string;
+  layer2_completed_at: string | null;
+  layer3_status: string;
+  layer3_completed_at: string | null;
+  // Cost tracking
   places_api_calls: number;
   serp_api_calls: number;
   estimated_cost_usd: number;
@@ -61,6 +72,16 @@ export interface LeadResponse {
   price_level: number | null;
   business_status: string | null;
   maps_url: string | null;
+  description: string | null;
+  verified: boolean | null;
+  reviews_per_score: Record<string, number> | null;
+  primary_email: string | null;
+  emails: Record<string, unknown> | null;
+  social_links: Record<string, string> | null;
+  owner_name: string | null;
+  employee_count: string | null;
+  year_established: number | null;
+  business_age_years: number | null;
   source: string;
   created_at: string;
 }
@@ -93,6 +114,52 @@ export interface ResultsQueryParams {
   has_phone?: boolean;
   has_website?: boolean;
   min_rating?: number;
+}
+
+export interface BatchDeleteResponse {
+  deleted: number;
+  errors: string[];
+}
+
+// Batch types
+export interface BatchJobInput {
+  keyword: string;
+  location: string;
+  location_type: string;
+  radius_km: number;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+export interface BatchCreatePayload {
+  name?: string | null;
+  user_email?: string | null;
+  jobs: BatchJobInput[];
+}
+
+export interface BatchResponse {
+  id: string;
+  name: string | null;
+  user_email: string | null;
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  status: string;
+  celery_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatchDetailResponse {
+  batch: BatchResponse;
+  jobs: JobResponse[];
+}
+
+export interface BatchListResponse {
+  items: BatchResponse[];
+  total: number;
+  skip: number;
+  limit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,9 +211,80 @@ export async function getJob(jobId: string): Promise<JobResponse> {
 }
 
 export async function cancelJob(jobId: string): Promise<JobResponse> {
-  return fetchApi<JobResponse>(`/api/jobs/${jobId}`, {
-    method: "DELETE",
+  return fetchApi<JobResponse>(`/api/jobs/${jobId}/cancel`, {
+    method: "POST",
   });
+}
+
+export async function deleteJob(jobId: string): Promise<void> {
+  const url = `${API_URL}/api/jobs/${jobId}`;
+  const response = await fetch(url, { method: "DELETE" });
+  if (!response.ok && response.status !== 204) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || `API error: ${response.status}`);
+  }
+}
+
+export async function batchDeleteJobs(
+  jobIds: string[]
+): Promise<BatchDeleteResponse> {
+  return fetchApi<BatchDeleteResponse>("/api/jobs/batch-delete", {
+    method: "POST",
+    body: JSON.stringify({ job_ids: jobIds }),
+  });
+}
+
+export async function enrichWithSerpapi(
+  jobId: string
+): Promise<JobResponse> {
+  return fetchApi<JobResponse>(`/api/jobs/${jobId}/enrich/serpapi`, {
+    method: "POST",
+  });
+}
+
+export async function enrichWithOutscraper(
+  jobId: string
+): Promise<JobResponse> {
+  return fetchApi<JobResponse>(`/api/jobs/${jobId}/enrich/outscraper`, {
+    method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Batches API
+// ---------------------------------------------------------------------------
+
+export async function createBatch(
+  payload: BatchCreatePayload
+): Promise<BatchDetailResponse> {
+  return fetchApi<BatchDetailResponse>("/api/batches/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listBatches(
+  skip = 0,
+  limit = 50
+): Promise<BatchListResponse> {
+  return fetchApi<BatchListResponse>(
+    `/api/batches/?skip=${skip}&limit=${limit}`
+  );
+}
+
+export async function getBatch(
+  batchId: string
+): Promise<BatchDetailResponse> {
+  return fetchApi<BatchDetailResponse>(`/api/batches/${batchId}`);
+}
+
+export async function deleteBatch(batchId: string): Promise<void> {
+  const url = `${API_URL}/api/batches/${batchId}`;
+  const response = await fetch(url, { method: "DELETE" });
+  if (!response.ok && response.status !== 204) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || `API error: ${response.status}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

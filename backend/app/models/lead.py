@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,6 +39,18 @@ class Lead(TimestampMixin, Base):
     price_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     business_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     maps_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    reviews_per_score: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Contact & enrichment data
+    primary_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    emails: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    social_links: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    owner_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    employee_count: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    year_established: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    business_age_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Source tracking
     source: Mapped[str] = mapped_column(

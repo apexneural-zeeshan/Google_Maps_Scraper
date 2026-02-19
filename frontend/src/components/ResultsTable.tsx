@@ -108,6 +108,7 @@ export default function ResultsTable({ leads, jobId }: ResultsTableProps) {
               <th className="px-4 py-3">
                 <input
                   type="checkbox"
+                  title="Select all"
                   checked={
                     filtered.length > 0 && selected.size === filtered.length
                   }
@@ -128,7 +129,19 @@ export default function ResultsTable({ leads, jobId }: ResultsTableProps) {
                 Phone
               </th>
               <th className="px-4 py-3 font-medium text-[var(--text-secondary)]">
+                Email
+              </th>
+              <th className="px-4 py-3 font-medium text-[var(--text-secondary)]">
                 Website
+              </th>
+              <th className="px-4 py-3 font-medium text-[var(--text-secondary)]">
+                Owner
+              </th>
+              <th className="px-4 py-3 font-medium text-[var(--text-secondary)]">
+                Employees
+              </th>
+              <th className="px-4 py-3 font-medium text-[var(--text-secondary)]">
+                Founded
               </th>
               <th
                 className="cursor-pointer px-4 py-3 font-medium text-[var(--text-secondary)] hover:text-[var(--text)]"
@@ -158,6 +171,7 @@ export default function ResultsTable({ leads, jobId }: ResultsTableProps) {
                 <td className="px-4 py-3">
                   <input
                     type="checkbox"
+                    title={`Select ${lead.name}`}
                     checked={selected.has(lead.id)}
                     onChange={() => toggleSelect(lead.id)}
                     className="h-4 w-4 rounded border-[var(--border)]"
@@ -183,6 +197,20 @@ export default function ResultsTable({ leads, jobId }: ResultsTableProps) {
                 <td className="whitespace-nowrap px-4 py-3 text-[var(--text-secondary)]">
                   {lead.phone || "\u2014"}
                 </td>
+                <td className="max-w-[200px] truncate px-4 py-3">
+                  {lead.primary_email ? (
+                    <a
+                      href={`mailto:${lead.primary_email}`}
+                      className="text-primary-600 hover:underline"
+                    >
+                      {lead.primary_email}
+                    </a>
+                  ) : (
+                    <span className="text-[var(--text-secondary)]">
+                      {"\u2014"}
+                    </span>
+                  )}
+                </td>
                 <td className="max-w-[150px] truncate px-4 py-3">
                   {lead.website ? (
                     <a
@@ -198,6 +226,15 @@ export default function ResultsTable({ leads, jobId }: ResultsTableProps) {
                       {"\u2014"}
                     </span>
                   )}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-[var(--text-secondary)]">
+                  {lead.owner_name || "\u2014"}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-[var(--text-secondary)]">
+                  {lead.employee_count || "\u2014"}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-[var(--text-secondary)]">
+                  {lead.year_established || "\u2014"}
                 </td>
                 <td className="px-4 py-3">
                   {lead.rating ? (
@@ -232,7 +269,7 @@ export default function ResultsTable({ leads, jobId }: ResultsTableProps) {
             {sorted.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={12}
                   className="px-4 py-8 text-center text-[var(--text-secondary)]"
                 >
                   {search

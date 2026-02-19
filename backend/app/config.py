@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # API Keys (all optional — project runs on free tier)
     serpapi_key: str = ""
     outscraper_api_key: str = ""
+    resend_api_key: str = ""
 
     # PostgreSQL
     postgres_user: str = "gmaps"
@@ -25,6 +26,13 @@ class Settings(BaseSettings):
     # Backend
     secret_key: str = "change-me"
     backend_cors_origins: list[str] = ["http://localhost:3000"]
+
+    # URLs for email links
+    app_base_url: str = "http://localhost:3000"
+    api_base_url: str = "http://localhost:8000"
+
+    # Email notifications (Resend.com)
+    notification_from_email: str = "GMaps Scraper <notifications@yourdomain.com>"
 
     # Nominatim (free geocoding)
     nominatim_user_agent: str = "GMapsScraperApp/1.0"

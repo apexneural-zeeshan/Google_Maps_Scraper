@@ -9,6 +9,7 @@ API docs: https://app.outscraper.com/api-docs
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 
 import httpx
 
@@ -47,12 +48,91 @@ def _increment_usage(count: int = 1) -> int:
     return _usage["count"]
 
 
+def _merge_outscraper_result(lead: dict, result: dict) -> bool:
+    """Merge Outscraper result fields into an existing lead dict.
+
+    Only fills in fields that are currently None — never overwrites existing data.
+
+    Returns True if any email field was added (for counting).
+    """
+    enriched = False
+
+    # Primary email
+    email = result.get("email") or result.get("email_1")
+    if email and not lead.get("primary_email"):
+        lead["primary_email"] = email
+        enriched = True
+
+    # Build emails dict
+    if not lead.get("emails"):
+        all_emails: list[str] = []
+        for key in ("email", "email_1", "email_2", "email_3"):
+            val = result.get(key)
+            if val and val not in all_emails:
+                all_emails.append(val)
+        if all_emails:
+            lead["emails"] = {
+                "primary": all_emails[0],
+                "secondary": all_emails[1:] if len(all_emails) > 1 else [],
+            }
+
+    # Social links
+    if not lead.get("social_links"):
+        social: dict[str, str] = {}
+        for platform in ("facebook", "instagram", "linkedin", "twitter", "youtube"):
+            val = result.get(platform)
+            if val:
+                social[platform] = val
+        if social:
+            lead["social_links"] = social
+
+    # Owner name
+    owner = result.get("owner_name") or result.get("owner")
+    if owner and not lead.get("owner_name"):
+        lead["owner_name"] = owner
+
+    # Employee count
+    employees = result.get("range_employees") or result.get("employees")
+    if employees and not lead.get("employee_count"):
+        lead["employee_count"] = str(employees)
+
+    # Year established and business age
+    year = result.get("founded") or result.get("year_established")
+    if year and not lead.get("year_established"):
+        try:
+            year_int = int(year)
+            lead["year_established"] = year_int
+            lead["business_age_years"] = datetime.now(timezone.utc).year - year_int
+        except (ValueError, TypeError):
+            pass
+
+    # Description (only if we don't already have one from Playwright/SerpAPI)
+    desc = result.get("description")
+    if desc and not lead.get("description"):
+        lead["description"] = desc
+
+    # Verified
+    verified = result.get("verified")
+    if verified is not None and lead.get("verified") is None:
+        lead["verified"] = bool(verified)
+
+    # Fill in phone/website if we didn't have them
+    if not lead.get("phone") and result.get("phone"):
+        lead["phone"] = result["phone"]
+    if not lead.get("website") and result.get("site"):
+        lead["website"] = result["site"]
+
+    return enriched
+
+
 async def enrich_leads(leads: list[dict]) -> list[dict]:
     """Enrich existing leads with email and social media data from Outscraper.
 
     Only runs if OUTSCRAPER_API_KEY is set and monthly limit is not exceeded.
     Queries Outscraper with business names + addresses to find matching records,
-    then merges email, facebook, instagram, twitter, linkedin, youtube fields.
+    then merges email, social, owner, employee, and description fields.
+
+    Handles 402 Payment Required gracefully (free tier requires verified card).
 
     Args:
         leads: List of lead dicts to enrich.
@@ -84,7 +164,7 @@ async def enrich_leads(leads: list[dict]) -> list[dict]:
     # Only enrich leads that are missing email/social data
     to_enrich = [
         lead for lead in leads
-        if not lead.get("email") and (lead.get("name") and lead.get("address"))
+        if not lead.get("primary_email") and (lead.get("name") and lead.get("address"))
     ]
 
     # Respect monthly limit
@@ -95,12 +175,6 @@ async def enrich_leads(leads: list[dict]) -> list[dict]:
         return leads
 
     logger.info("Enriching %d leads via Outscraper (usage: %d/%d)", len(to_enrich), current_usage, limit)
-
-    # Build name→lead index for matching results back
-    lead_index: dict[str, dict] = {}
-    for lead in to_enrich:
-        key = f"{lead['name']}|||{lead.get('address', '')}"
-        lead_index[key] = lead
 
     # Query Outscraper in batches of 20
     batch_size = 20
@@ -128,6 +202,12 @@ async def enrich_leads(leads: list[dict]) -> list[dict]:
                 data = response.json()
 
             except httpx.HTTPStatusError as e:
+                if e.response.status_code == 402:
+                    logger.warning(
+                        "Outscraper 402 Payment Required — free tier may require "
+                        "a verified credit card. Skipping remaining enrichment."
+                    )
+                    break
                 logger.error(
                     "Outscraper API error: %d %s",
                     e.response.status_code,
@@ -151,27 +231,8 @@ async def enrich_leads(leads: list[dict]) -> list[dict]:
                     continue
 
                 lead = batch[i]
-
-                # Merge enrichment fields
-                if result.get("email"):
-                    lead["email"] = result["email"]
+                if _merge_outscraper_result(lead, result):
                     enriched_count += 1
-                if result.get("facebook"):
-                    lead["facebook"] = result["facebook"]
-                if result.get("instagram"):
-                    lead["instagram"] = result["instagram"]
-                if result.get("twitter"):
-                    lead["twitter"] = result["twitter"]
-                if result.get("linkedin"):
-                    lead["linkedin"] = result["linkedin"]
-                if result.get("youtube"):
-                    lead["youtube"] = result["youtube"]
-
-                # Fill in phone/website if we didn't have them
-                if not lead.get("phone") and result.get("phone"):
-                    lead["phone"] = result["phone"]
-                if not lead.get("website") and result.get("site"):
-                    lead["website"] = result["site"]
 
             _increment_usage(len(batch))
 

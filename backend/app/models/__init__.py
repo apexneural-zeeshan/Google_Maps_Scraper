@@ -21,5 +21,5 @@ class TimestampMixin:
 
 
 # Import models so Alembic can detect them
-from app.models.job import Job  # noqa: E402, F401
+from app.models.job import Batch, Job  # noqa: E402, F401
 from app.models.lead import Lead  # noqa: E402, F401

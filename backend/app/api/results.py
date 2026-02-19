@@ -103,36 +103,55 @@ async def export_csv(
     output = io.StringIO()
 
     if template == "clay":
-        # Clay-compatible CSV: Company Name, Website, Phone, Address, City
-        fieldnames = ["Company Name", "Website", "Phone Number", "Address", "Rating", "Reviews"]
+        # Clay.com compatible CSV
+        fieldnames = [
+            "Company Name", "Website", "Phone Number", "Email", "Address",
+            "Rating", "Reviews", "Contact Name", "Company Size",
+            "Founded Year", "LinkedIn URL", "Facebook URL",
+            "Instagram URL", "Company Description",
+        ]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         for lead in leads:
+            social = lead.social_links or {}
             writer.writerow({
                 "Company Name": lead.name,
                 "Website": lead.website or "",
                 "Phone Number": lead.phone or "",
+                "Email": lead.primary_email or "",
                 "Address": lead.address or "",
                 "Rating": lead.rating or "",
                 "Reviews": lead.review_count or "",
+                "Contact Name": lead.owner_name or "",
+                "Company Size": lead.employee_count or "",
+                "Founded Year": lead.year_established or "",
+                "LinkedIn URL": social.get("linkedin", ""),
+                "Facebook URL": social.get("facebook", ""),
+                "Instagram URL": social.get("instagram", ""),
+                "Company Description": lead.description or "",
             })
     else:
         # Default full export
         fieldnames = [
             "place_id", "name", "address", "phone", "website",
-            "rating", "review_count", "business_type", "types",
+            "primary_email", "rating", "review_count", "business_type", "types",
             "latitude", "longitude", "price_level", "business_status",
-            "maps_url", "source",
+            "maps_url", "description", "verified", "owner_name",
+            "employee_count", "year_established", "business_age_years",
+            "social_facebook", "social_linkedin", "social_instagram",
+            "social_twitter", "social_youtube", "source",
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         for lead in leads:
+            social = lead.social_links or {}
             writer.writerow({
                 "place_id": lead.place_id,
                 "name": lead.name,
                 "address": lead.address or "",
                 "phone": lead.phone or "",
                 "website": lead.website or "",
+                "primary_email": lead.primary_email or "",
                 "rating": lead.rating or "",
                 "review_count": lead.review_count or "",
                 "business_type": lead.business_type or "",
@@ -142,6 +161,17 @@ async def export_csv(
                 "price_level": lead.price_level or "",
                 "business_status": lead.business_status or "",
                 "maps_url": lead.maps_url or "",
+                "description": lead.description or "",
+                "verified": lead.verified if lead.verified is not None else "",
+                "owner_name": lead.owner_name or "",
+                "employee_count": lead.employee_count or "",
+                "year_established": lead.year_established or "",
+                "business_age_years": lead.business_age_years or "",
+                "social_facebook": social.get("facebook", ""),
+                "social_linkedin": social.get("linkedin", ""),
+                "social_instagram": social.get("instagram", ""),
+                "social_twitter": social.get("twitter", ""),
+                "social_youtube": social.get("youtube", ""),
                 "source": lead.source,
             })
 
@@ -225,6 +255,8 @@ async def get_stats(
         "avg_rating": avg_rating,
         "with_phone": with_phone,
         "with_website": with_website,
-        "with_email": 0,  # Email not collected yet
+        "with_email": (await db.execute(
+            select(func.count()).where(Lead.job_id == job_id).where(Lead.primary_email.is_not(None))
+        )).scalar_one(),
         "business_types": business_types,
     }

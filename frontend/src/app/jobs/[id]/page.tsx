@@ -95,10 +95,10 @@ export default function JobDetailPage() {
       <div className="flex items-center justify-between">
         <div>
           <Link
-            href="/"
+            href="/jobs"
             className="text-sm text-[var(--text-secondary)] hover:text-[var(--text)]"
           >
-            &larr; Back
+            &larr; Back to Jobs
           </Link>
           <h1 className="mt-1 text-2xl font-bold text-[var(--text)]">
             {job.keyword} in {job.location}
