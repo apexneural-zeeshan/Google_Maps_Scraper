@@ -89,4 +89,5 @@ def downgrade() -> None:
     op.drop_index('ix_jobs_status', table_name='jobs')
     op.drop_index('ix_jobs_created_at', table_name='jobs')
     op.drop_table('jobs')
+    op.execute("DROP TYPE IF EXISTS job_status")
     # ### end Alembic commands ###
