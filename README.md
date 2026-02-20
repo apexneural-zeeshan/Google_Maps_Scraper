@@ -2,7 +2,6 @@
 
 A free-tier ($0/month) Google Maps scraping tool with Playwright-based data
 collection, async task processing, and a modern web UI.
-**No paid API keys required.**
 
 ## Architecture
 
@@ -54,7 +53,6 @@ collection, async task processing, and a modern web UI.
 ### Prerequisites
 
 - Docker & Docker Compose
-- That's it. No paid API keys needed.
 
 Optional (for more data):
 - SerpAPI key (100 free searches/month) — [serpapi.com](https://serpapi.com)
