@@ -1,7 +1,7 @@
 # Google Maps Scraper
 
 A free-tier ($0/month) Google Maps scraping tool with Playwright-based data
-collection, async task processing, and a modern web UI.
+collection, async task processing, and a modern web UI .
 
 ## Architecture
 
