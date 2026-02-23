@@ -13,3 +13,4 @@ python-dotenv==1.0.1
 flower==2.0.1
 thefuzz[speedup]==0.22.1
 playwright==1.49.1
+openpyxl==3.1.5

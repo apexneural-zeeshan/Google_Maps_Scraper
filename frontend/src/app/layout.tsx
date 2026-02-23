@@ -34,6 +34,12 @@ export default function RootLayout({
                 href="/"
                 className="text-sm font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
               >
+                Dashboard
+              </Link>
+              <Link
+                href="/scrape"
+                className="text-sm font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+              >
                 New Scrape
               </Link>
               <Link

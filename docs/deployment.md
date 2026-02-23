@@ -65,6 +65,48 @@ server {
 
 ---
 
+## Dokploy (Production)
+
+Deployment with custom domains:
+
+- **Frontend:** `https://gmapscraper.apexneural.cloud`
+- **Backend API:** `https://gmapscraperapi.apexneural.cloud`
+
+CORS is configured to allow the frontend origin by default. Override via `BACKEND_CORS_ORIGINS` if needed.
+
+### Backend `.env` (on production server)
+
+Set these (and other vars from `.env.example`):
+
+```env
+# Required for Dokploy domains
+BACKEND_CORS_ORIGINS=["https://gmapscraper.apexneural.cloud"]
+APP_BASE_URL=https://gmapscraper.apexneural.cloud
+API_BASE_URL=https://gmapscraperapi.apexneural.cloud
+
+# Other production settings (examples)
+SECRET_KEY=<your-secure-random-key>
+DATABASE_URL=postgresql+asyncpg://...
+DATABASE_URL_SYNC=postgresql+psycopg2://...
+REDIS_URL=redis://...
+```
+
+- **`BACKEND_CORS_ORIGINS`** – Must include the frontend origin so the browser can call the API. Use a JSON array, e.g. `["https://gmapscraper.apexneural.cloud"]`. Add `http://localhost:3000` if you need local dev against this backend.
+- **`APP_BASE_URL`** – Base URL of the frontend (used for email links, etc.).
+- **`API_BASE_URL`** – Base URL of the backend API (used for links in emails/notifications).
+
+### Frontend `.env` (on production server)
+
+Set the public API URL so the app talks to your backend:
+
+```env
+NEXT_PUBLIC_API_URL=https://gmapscraperapi.apexneural.cloud
+```
+
+- **`NEXT_PUBLIC_API_URL`** – Must be the public URL of the backend (e.g. `https://gmapscraperapi.apexneural.cloud`). No trailing slash. This is baked in at build time, so rebuild the frontend after changing it.
+
+---
+
 ## Railway
 
 Railway supports Docker-based deployments with managed PostgreSQL and Redis.

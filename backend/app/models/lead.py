@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base, TimestampMixin
@@ -51,6 +51,16 @@ class Lead(TimestampMixin, Base):
     employee_count: Mapped[str | None] = mapped_column(String(50), nullable=True)
     year_established: Mapped[int | None] = mapped_column(Integer, nullable=True)
     business_age_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # User management
+    is_favorite: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False, index=True,
+    )
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # Source tracking
     source: Mapped[str] = mapped_column(

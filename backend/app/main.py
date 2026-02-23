@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.batches import router as batches_router
 from app.api.jobs import router as jobs_router
 from app.api.results import router as results_router
+from app.api.stats import router as stats_router
 from app.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -29,7 +30,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.backend_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,6 +39,7 @@ app.add_middleware(
 app.include_router(jobs_router)
 app.include_router(results_router)
 app.include_router(batches_router)
+app.include_router(stats_router)
 
 
 @app.get("/health", tags=["health"])

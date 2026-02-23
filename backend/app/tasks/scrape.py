@@ -346,11 +346,24 @@ def _send_email_sync(
     email_type: str = "completed", error_message: str = "",
 ) -> None:
     """Send email notification from sync Celery context. Never raises."""
-    if not settings.resend_api_key or not to_email:
+    if not settings.resend_api_key:
+        logger.debug("RESEND_API_KEY not set — skipping email")
+        return
+    if not to_email:
+        logger.debug("No user_email on job — skipping email")
         return
 
+    job_id = job_data.get("job_id", "?")
+    logger.info(
+        "Sending %s email to %s for job %s",
+        email_type, to_email, job_id,
+    )
+
     try:
-        from app.services.email import send_job_completion_email, send_job_failed_email
+        from app.services.email import (
+            send_job_completion_email,
+            send_job_failed_email,
+        )
 
         if email_type == "completed":
             _run_async(send_job_completion_email(to_email, job_data))

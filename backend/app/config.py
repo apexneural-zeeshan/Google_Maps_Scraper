@@ -25,14 +25,20 @@ class Settings(BaseSettings):
 
     # Backend
     secret_key: str = "change-me"
-    backend_cors_origins: list[str] = ["http://localhost:3000"]
+    backend_cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://gmapscraper.apexneural.cloud",
+    ]
 
     # URLs for email links
     app_base_url: str = "http://localhost:3000"
     api_base_url: str = "http://localhost:8000"
 
     # Email notifications (Resend.com)
-    notification_from_email: str = "GMaps Scraper <notifications@yourdomain.com>"
+    # Resend.com free tier only allows "onboarding@resend.dev" as sender
+    # unless you verify your own domain at https://resend.com/domains
+    notification_from_email: str = "GMaps Scraper <onboarding@resend.dev>"
 
     # Nominatim (free geocoding)
     nominatim_user_agent: str = "GMapsScraperApp/1.0"

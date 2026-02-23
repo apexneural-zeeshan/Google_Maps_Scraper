@@ -114,7 +114,7 @@ export default function JobDetailPage() {
 
       {leads.length > 0 && (
         <>
-          <ResultsTable leads={leads} jobId={jobId} />
+          <ResultsTable leads={leads} jobId={jobId} onRefresh={fetchResults} />
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between">

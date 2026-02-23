@@ -29,14 +29,12 @@ export interface JobResponse {
   current_step: string | null;
   total_found: number;
   total_unique: number;
-  // Layer statuses
   layer1_status: string;
   layer1_completed_at: string | null;
   layer2_status: string;
   layer2_completed_at: string | null;
   layer3_status: string;
   layer3_completed_at: string | null;
-  // Cost tracking
   places_api_calls: number;
   serp_api_calls: number;
   estimated_cost_usd: number;
@@ -82,6 +80,10 @@ export interface LeadResponse {
   employee_count: string | null;
   year_established: number | null;
   business_age_years: number | null;
+  is_favorite: boolean;
+  is_archived: boolean;
+  notes: string | null;
+  tags: string[] | null;
   source: string;
   created_at: string;
 }
@@ -91,6 +93,17 @@ export interface LeadListResponse {
   total: number;
   skip: number;
   limit: number;
+}
+
+export interface LeadUpdate {
+  is_favorite?: boolean;
+  is_archived?: boolean;
+  notes?: string;
+  tags?: string[];
+}
+
+export interface LeadBatchActionResponse {
+  count: number;
 }
 
 export interface JobStatsResponse {
@@ -114,6 +127,9 @@ export interface ResultsQueryParams {
   has_phone?: boolean;
   has_website?: boolean;
   min_rating?: number;
+  favorite_only?: boolean;
+  archived?: boolean;
+  tags?: string;
 }
 
 export interface BatchDeleteResponse {
@@ -121,7 +137,6 @@ export interface BatchDeleteResponse {
   errors: string[];
 }
 
-// Batch types
 export interface BatchJobInput {
   keyword: string;
   location: string;
@@ -160,6 +175,37 @@ export interface BatchListResponse {
   total: number;
   skip: number;
   limit: number;
+}
+
+// Stats types
+export interface OverviewStats {
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  running_jobs: number;
+  total_leads: number;
+  total_unique_leads: number;
+  favorite_leads: number;
+  total_scraping_time_hours: number;
+  avg_leads_per_job: number;
+  success_rate: number;
+}
+
+export interface ApiUsage {
+  month: string;
+  serpapi: { used: number; limit: number; remaining: number };
+  outscraper: { used: number; limit: number; remaining: number };
+  playwright: { total_pages_scraped: number; limit: string };
+}
+
+export interface RecentActivityItem {
+  type: string;
+  keyword?: string;
+  location?: string;
+  leads?: number;
+  error?: string;
+  time: string;
+  job_id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +334,7 @@ export async function deleteBatch(batchId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Results API
+// Results / Leads API
 // ---------------------------------------------------------------------------
 
 export async function getResults(
@@ -308,6 +354,9 @@ export async function getResults(
     searchParams.set("has_website", String(params.has_website));
   if (params.min_rating !== undefined)
     searchParams.set("min_rating", String(params.min_rating));
+  if (params.favorite_only) searchParams.set("favorite_only", "true");
+  if (params.archived) searchParams.set("archived", "true");
+  if (params.tags) searchParams.set("tags", params.tags);
 
   const qs = searchParams.toString();
   return fetchApi<LeadListResponse>(
@@ -315,15 +364,73 @@ export async function getResults(
   );
 }
 
+export async function updateLead(
+  leadId: string,
+  data: LeadUpdate
+): Promise<LeadResponse> {
+  return fetchApi<LeadResponse>(`/api/results/${leadId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteLead(leadId: string): Promise<void> {
+  const url = `${API_URL}/api/results/${leadId}`;
+  const response = await fetch(url, { method: "DELETE" });
+  if (!response.ok && response.status !== 204) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || `API error: ${response.status}`);
+  }
+}
+
+export async function batchUpdateLeads(
+  leadIds: string[],
+  update: LeadUpdate
+): Promise<LeadBatchActionResponse> {
+  return fetchApi<LeadBatchActionResponse>("/api/results/batch-update", {
+    method: "POST",
+    body: JSON.stringify({ lead_ids: leadIds, update }),
+  });
+}
+
+export async function batchDeleteLeads(
+  leadIds: string[]
+): Promise<LeadBatchActionResponse> {
+  return fetchApi<LeadBatchActionResponse>("/api/results/batch-delete", {
+    method: "POST",
+    body: JSON.stringify({ lead_ids: leadIds }),
+  });
+}
+
 export function getExportUrl(
   jobId: string,
-  template: "default" | "clay" = "default"
+  format: "csv" | "xlsx" = "csv",
+  template: "default" | "clay" | "hubspot" | "outreach" = "default",
+  favoritesOnly = false
 ): string {
-  return `${API_URL}/api/results/${jobId}/export?template=${template}`;
+  const params = new URLSearchParams({ format, template });
+  if (favoritesOnly) params.set("favorites_only", "true");
+  return `${API_URL}/api/results/${jobId}/export?${params}`;
 }
 
 export async function getJobStats(
   jobId: string
 ): Promise<JobStatsResponse> {
   return fetchApi<JobStatsResponse>(`/api/results/${jobId}/stats`);
+}
+
+// ---------------------------------------------------------------------------
+// Stats API
+// ---------------------------------------------------------------------------
+
+export async function getOverviewStats(): Promise<OverviewStats> {
+  return fetchApi<OverviewStats>("/api/stats/overview");
+}
+
+export async function getApiUsage(): Promise<ApiUsage> {
+  return fetchApi<ApiUsage>("/api/stats/api-usage");
+}
+
+export async function getRecentActivity(): Promise<RecentActivityItem[]> {
+  return fetchApi<RecentActivityItem[]>("/api/stats/recent-activity");
 }

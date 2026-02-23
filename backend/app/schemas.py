@@ -188,8 +188,33 @@ class LeadResponse(BaseModel):
     employee_count: str | None
     year_established: int | None
     business_age_years: int | None
+    is_favorite: bool = False
+    is_archived: bool = False
+    notes: str | None = None
+    tags: list[str] | None = None
     source: str
     created_at: datetime
+
+
+class LeadUpdate(BaseModel):
+    """Partial update for a single lead's user-managed fields."""
+    is_favorite: bool | None = None
+    is_archived: bool | None = None
+    notes: str | None = None
+    tags: list[str] | None = None
+
+
+class LeadBatchUpdateRequest(BaseModel):
+    lead_ids: list[UUID] = Field(..., min_length=1, max_length=500)
+    update: LeadUpdate
+
+
+class LeadBatchDeleteRequest(BaseModel):
+    lead_ids: list[UUID] = Field(..., min_length=1, max_length=500)
+
+
+class LeadBatchActionResponse(BaseModel):
+    count: int
 
 
 class LeadListResponse(BaseModel):
@@ -200,7 +225,7 @@ class LeadListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Stats Schema
+# Stats Schemas
 # ---------------------------------------------------------------------------
 
 class JobStatsResponse(BaseModel):
@@ -213,3 +238,33 @@ class JobStatsResponse(BaseModel):
     with_website: int
     with_email: int
     business_types: dict[str, int]
+
+
+class OverviewStatsResponse(BaseModel):
+    total_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    running_jobs: int
+    total_leads: int
+    total_unique_leads: int
+    favorite_leads: int
+    total_scraping_time_hours: float
+    avg_leads_per_job: float
+    success_rate: float
+
+
+class ApiUsageResponse(BaseModel):
+    month: str
+    serpapi: dict
+    outscraper: dict
+    playwright: dict
+
+
+class RecentActivityItem(BaseModel):
+    type: str
+    keyword: str | None = None
+    location: str | None = None
+    leads: int | None = None
+    error: str | None = None
+    time: str
+    job_id: str | None = None
