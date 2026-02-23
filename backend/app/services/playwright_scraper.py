@@ -140,25 +140,76 @@ async def _scroll_results_panel(page: Page, max_scrolls: int = 5) -> None:
                 break
 
 
+async def _handle_consent_dialog(page: Page) -> None:
+    """Best-effort consent acceptance across page and iframe variants."""
+    consent_texts = ("Accept all", "I agree", "Agree", "Accept")
+
+    for text in consent_texts:
+        try:
+            btn = page.locator(f'button:has-text("{text}")')
+            if await btn.count() > 0:
+                await btn.first.click(timeout=2000)
+                await asyncio.sleep(1.0)
+                return
+        except Exception:
+            pass
+
+    for frame in page.frames:
+        for text in consent_texts:
+            try:
+                btn = frame.locator(f'button:has-text("{text}")')
+                if await btn.count() > 0:
+                    await btn.first.click(timeout=2000)
+                    await asyncio.sleep(1.0)
+                    return
+            except Exception:
+                pass
+
+
 async def _extract_listings_from_feed(page: Page) -> list[dict]:
     """Extract listing data from the results feed panel."""
     listings: list[dict] = []
 
-    links = page.locator('div[role="feed"] a[href*="/maps/place/"]')
+    links = page.locator(
+        'div[role="feed"] a[href*="/maps/place/"], '
+        'div[role="feed"] a[href*="google.com/maps/place"], '
+        'div[role="feed"] a[href*="/maps?cid="]'
+    )
     count = await links.count()
+    if count == 0:
+        links = page.locator(
+            'div[role="feed"] a.hfpxzc, div[role="feed"] a[href*="/maps/"]'
+        )
+        count = await links.count()
 
-    logger.info("Found %d listing links in feed", count)
+    logger.info("Found %d candidate listing links in feed", count)
 
     for i in range(count):
         try:
             link = links.nth(i)
             href = await link.get_attribute("href") or ""
             aria_label = await link.get_attribute("aria-label") or ""
+            if not href:
+                continue
 
-            if not aria_label:
+            name = aria_label.strip()
+            if not name:
+                card = link.locator(
+                    'xpath=ancestor::div[contains(@class, "Nv2PK")]'
+                ).first
+                title_el = card.locator("div.qBF1Pd").first
+                if await title_el.count() > 0:
+                    name = (await title_el.inner_text()).strip()
+            if not name:
+                name = (await link.inner_text()).strip()
+            if not name:
                 continue
 
             container = link.locator("xpath=ancestor::div[contains(@jsaction, 'mouseover')]").first
+            if await container.count() == 0:
+                container = link.locator(
+                    'xpath=ancestor::div[contains(@class, "Nv2PK")]'
+                ).first
 
             category = ""
             category_els = container.locator('div.fontBodyMedium > div > span > span')
@@ -168,6 +219,10 @@ async def _extract_listings_from_feed(page: Page) -> list[dict]:
 
             rating = None
             review_count = None
+            if not category:
+                chips = container.locator("div.W4Efsd span")
+                if await chips.count() > 0:
+                    category = (await chips.first.inner_text()).strip()
             rating_el = container.locator('span[role="img"]')
             if await rating_el.count() > 0:
                 rating_label = await rating_el.first.get_attribute("aria-label") or ""
@@ -183,7 +238,7 @@ async def _extract_listings_from_feed(page: Page) -> list[dict]:
 
             listing = {
                 "place_id": "",
-                "name": aria_label,
+                "name": name,
                 "address": address or None,
                 "phone": None,
                 "website": None,
@@ -370,16 +425,8 @@ async def _scrape_single_cell(
                 search_url, wait_until="domcontentloaded", timeout=30000,
             )
 
-            # Handle consent dialog
-            try:
-                consent_btn = page.locator(
-                    'button:has-text("Accept all")',
-                )
-                if await consent_btn.count() > 0:
-                    await consent_btn.first.click()
-                    await asyncio.sleep(1.0)
-            except Exception:
-                pass
+            # Handle consent dialog (including iframe variants).
+            await _handle_consent_dialog(page)
 
             # Wait for results
             try:
@@ -388,8 +435,9 @@ async def _scrape_single_cell(
                 )
             except PlaywrightTimeout:
                 logger.warning(
-                    "No results feed for '%s' at (%.4f, %.4f)",
+                    "No results feed for '%s' at (%.4f, %.4f); url=%s",
                     keyword, latitude, longitude,
+                    page.url,
                 )
                 return [], 1
 
