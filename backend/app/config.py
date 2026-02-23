@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://gmaps:gmaps_secret@db:5432/gmaps_scraper"
     database_url_sync: str = "postgresql+psycopg2://gmaps:gmaps_secret@db:5432/gmaps_scraper"
 
-    # Redis
+    # Redis (Celery broker + result backend). On Dokploy set REDIS_URL to your Redis service URL.
     redis_url: str = "redis://redis:6379/0"
 
     # Backend

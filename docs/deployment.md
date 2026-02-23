@@ -89,6 +89,20 @@ BACKEND_PORT=8554
 - **`FRONTEND_PORT`** – Host port for the frontend container (default dev: 3000). Production: **3334**.
 - **`BACKEND_PORT`** – Host port for the backend container (default dev: 8000). Production: **8554**.
 
+### Redis and database on Dokploy
+
+The default `redis_url` is `redis://redis:6379/0`. The hostname **`redis`** only resolves inside Docker Compose. On Dokploy you must:
+
+1. **Deploy a Redis service** (e.g. Dokploy’s Redis template, or use an external Redis like Upstash / Redis Cloud).
+2. **Set `REDIS_URL`** in the backend and Celery worker env to a URL the backend/worker can reach, for example:
+   - Internal Redis: `redis://<redis-service-host>:6379/0` (use the host Dokploy gives for the Redis service).
+   - External Redis: `redis://default:YOUR_PASSWORD@your-redis-host:6379/0` or the URL your provider gives you.
+
+If `REDIS_URL` is wrong or Redis is not deployed, you will see:  
+`Error -2 connecting to redis:6379. Name or service not known` and job creation will fail (Celery needs Redis as broker).
+
+Same idea for **Postgres**: set `DATABASE_URL` and `DATABASE_URL_SYNC` to your real DB URLs (not `db:5432` unless that hostname exists in your Dokploy network).
+
 ### Backend `.env` (on production server)
 
 Set these (and other vars from `.env.example`):
@@ -99,14 +113,15 @@ BACKEND_CORS_ORIGINS=["https://gmapscraper.apexneural.cloud"]
 APP_BASE_URL=https://gmapscraper.apexneural.cloud
 API_BASE_URL=https://gmapscraperapi.apexneural.cloud
 
-# Other production settings (examples)
+# Required: use URLs reachable from your backend/worker (not docker hostnames unless in same network)
 SECRET_KEY=<your-secure-random-key>
-DATABASE_URL=postgresql+asyncpg://...
-DATABASE_URL_SYNC=postgresql+psycopg2://...
-REDIS_URL=redis://...
+DATABASE_URL=postgresql+asyncpg://USER:PASS@YOUR_DB_HOST:5432/DATABASE
+DATABASE_URL_SYNC=postgresql+psycopg2://USER:PASS@YOUR_DB_HOST:5432/DATABASE
+REDIS_URL=redis://YOUR_REDIS_HOST:6379/0
 ```
 
-- **`BACKEND_CORS_ORIGINS`** – Must include the frontend origin so the browser can call the API. Use a JSON array, e.g. `["https://gmapscraper.apexneural.cloud"]`. Add `http://localhost:3000` if you need local dev against this backend.
+- **`REDIS_URL`** – **Must** point to a Redis instance the backend and Celery worker can connect to (see “Redis and database on Dokploy” above).
+- **`BACKEND_CORS_ORIGINS`** – Must include the frontend origin. Use a JSON array, e.g. `["https://gmapscraper.apexneural.cloud"]`.
 - **`APP_BASE_URL`** – Base URL of the frontend (used for email links, etc.).
 - **`API_BASE_URL`** – Base URL of the backend API (used for links in emails/notifications).
 

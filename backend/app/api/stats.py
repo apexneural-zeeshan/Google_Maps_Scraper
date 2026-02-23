@@ -1,7 +1,7 @@
 """Dashboard statistics API."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import distinct, func, select
@@ -114,7 +114,7 @@ async def get_overview(
 async def get_api_usage(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     month_str = now.strftime("%Y-%m")
     month_start = now.replace(
         day=1, hour=0, minute=0, second=0, microsecond=0,
@@ -180,7 +180,7 @@ async def get_recent_activity(
     )
     jobs = result.scalars().all()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     items = []
     for job in jobs:
         elapsed = now - job.updated_at
