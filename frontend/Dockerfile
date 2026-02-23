@@ -7,6 +7,8 @@ RUN npm install
 
 COPY . .
 
-EXPOSE 3000
+# Production port for Dokploy; override with PORT env if needed
+ENV PORT=3334
+EXPOSE 3334
 
 CMD ["npm", "run", "dev"]

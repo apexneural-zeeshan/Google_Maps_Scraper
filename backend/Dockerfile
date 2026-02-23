@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN chmod +x /app/start.sh
 
-EXPOSE 8000
+# Production port for Dokploy; override with PORT env if needed
+ENV PORT=8554
+EXPOSE 8554
 
 CMD ["/app/start.sh"]

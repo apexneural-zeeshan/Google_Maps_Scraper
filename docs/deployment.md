@@ -69,10 +69,25 @@ server {
 
 Deployment with custom domains:
 
-- **Frontend:** `https://gmapscraper.apexneural.cloud`
-- **Backend API:** `https://gmapscraperapi.apexneural.cloud`
+- **Frontend:** `https://gmapscraper.apexneural.cloud` (port **3334**)
+- **Backend API:** `https://gmapscraperapi.apexneural.cloud` (port **8554**)
 
 CORS is configured to allow the frontend origin by default. Override via `BACKEND_CORS_ORIGINS` if needed.
+
+Ports are controlled by `FRONTEND_PORT` and `BACKEND_PORT` in the root `.env` used by Docker Compose. Set them for production so the reverse proxy (e.g. Dokploy) can map the domains to the correct container ports.
+
+### Root `.env` (Docker Compose – production)
+
+Set the host ports used when running `docker compose`:
+
+```env
+# Production ports (host mapping)
+FRONTEND_PORT=3334
+BACKEND_PORT=8554
+```
+
+- **`FRONTEND_PORT`** – Host port for the frontend container (default dev: 3000). Production: **3334**.
+- **`BACKEND_PORT`** – Host port for the backend container (default dev: 8000). Production: **8554**.
 
 ### Backend `.env` (on production server)
 
@@ -163,6 +178,8 @@ Railway supports Docker-based deployments with managed PostgreSQL and Redis.
 
 | Variable | Required | Notes |
 |----------|----------|-------|
+| FRONTEND_PORT | No | Host port for frontend (default: 3000). Production: 3334 |
+| BACKEND_PORT | No | Host port for backend (default: 8000). Production: 8554 |
 | GOOGLE_MAPS_API_KEY | Yes | Google Cloud Console |
 | SERPAPI_KEY | Recommended | serpapi.com |
 | DATABASE_URL | Yes | PostgreSQL async URL |
@@ -171,5 +188,7 @@ Railway supports Docker-based deployments with managed PostgreSQL and Redis.
 | SECRET_KEY | Yes | Random string for production |
 | BACKEND_CORS_ORIGINS | Yes | JSON array of allowed origins |
 | NEXT_PUBLIC_API_URL | Yes | Public URL of the backend API |
+| APP_BASE_URL | No | Frontend base URL (emails, etc.) |
+| API_BASE_URL | No | Backend base URL (emails, etc.) |
 | PLACES_API_RPS | No | Default: 10 |
 | SERP_API_RPS | No | Default: 5 |
