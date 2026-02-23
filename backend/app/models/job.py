@@ -22,6 +22,18 @@ class JobStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+# In-progress job statuses (for counts). Do NOT use "running" — that is Batch/LayerStatus only.
+JOB_STATUSES_IN_PROGRESS: tuple[str, ...] = (
+    JobStatus.PENDING.value,
+    JobStatus.GEOCODING.value,
+    JobStatus.GRID_SEARCH.value,
+    JobStatus.PLAYWRIGHT.value,
+    JobStatus.SERP_API.value,
+    JobStatus.DEDUP.value,
+    JobStatus.ENRICHING.value,
+)
+
+
 class LayerStatus(str, enum.Enum):
     """Status for each independent scraping layer."""
     IDLE = "idle"

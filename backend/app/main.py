@@ -28,14 +28,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Ensure production frontend origin is always allowed (even if env overrides CORS list)
-_origins = list(settings.backend_cors_origins)
+# CORS: ensure production origin is always allowed; never send empty list (would omit header)
+_origins = list(settings.backend_cors_origins) if settings.backend_cors_origins else []
 if settings.cors_production_origin and settings.cors_production_origin not in _origins:
     _origins.append(settings.cors_production_origin)
+if not _origins:
+    _origins = [settings.cors_production_origin or "https://gmapscraper.apexneural.cloud"]
 logger.info("CORS allowed origins: %s", _origins)
+# Allow any subdomain of apexneural.cloud as fallback (e.g. if Origin format differs)
+_cors_origin_regex = r"^https://([a-z0-9-]+\.)*apexneural\.cloud$"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

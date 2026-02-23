@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.session import get_db
-from app.models.job import Job
+from app.models.job import JOB_STATUSES_IN_PROGRESS, Job
 from app.models.lead import Lead
 from app.schemas import (
     ApiUsageResponse,
@@ -44,12 +44,9 @@ async def get_overview(
     )
     failed_jobs = failed_r.scalar_one()
 
+    # Only valid job_status enum values (never "running" — that is Batch/LayerStatus)
     running_r = await db.execute(
-        select(func.count()).where(
-            Job.status.in_(["running", "geocoding", "grid_search",
-                            "playwright", "serp_api", "enriching",
-                            "dedup"]),
-        ),
+        select(func.count()).where(Job.status.in_(JOB_STATUSES_IN_PROGRESS)),
     )
     running_jobs = running_r.scalar_one()
 
