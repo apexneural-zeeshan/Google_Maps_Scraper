@@ -28,9 +28,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Ensure production frontend origin is always allowed (even if env overrides CORS list)
+_origins = list(settings.backend_cors_origins)
+if settings.cors_production_origin and settings.cors_production_origin not in _origins:
+    _origins.append(settings.cors_production_origin)
+logger.info("CORS allowed origins: %s", _origins)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.backend_cors_origins,
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

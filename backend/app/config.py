@@ -25,11 +25,14 @@ class Settings(BaseSettings):
 
     # Backend
     secret_key: str = "change-me"
+    # CORS: list of allowed origins (JSON in env, e.g. ["https://gmapscraper.apexneural.cloud"])
     backend_cors_origins: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://gmapscraper.apexneural.cloud",
     ]
+    # Always allow this origin (merged at runtime so production never blocked by env typo)
+    cors_production_origin: str = "https://gmapscraper.apexneural.cloud"
 
     # URLs for email links
     app_base_url: str = "http://localhost:3000"
