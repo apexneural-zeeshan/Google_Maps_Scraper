@@ -63,9 +63,12 @@ USER_AGENTS = [
 
 
 def _build_search_url(keyword: str, location: str, lat: float, lng: float, zoom: int = 14) -> str:
-    """Build a Google Maps search URL."""
+    """Build a Google Maps search URL.
+
+    Appends ``hl=en`` to force English UI regardless of server location.
+    """
     query = urllib.parse.quote(f"{keyword} in {location}")
-    return f"https://www.google.com/maps/search/{query}/@{lat},{lng},{zoom}z"
+    return f"https://www.google.com/maps/search/{query}/@{lat},{lng},{zoom}z?hl=en"
 
 
 def _parse_rating_text(text: str) -> tuple[float | None, int | None]:
@@ -95,7 +98,12 @@ def _parse_rating_text(text: str) -> tuple[float | None, int | None]:
 async def _create_browser_context(
     p,
 ) -> tuple[Browser, BrowserContext]:
-    """Create a fresh browser and context with randomized fingerprint."""
+    """Create a fresh browser and context with randomized fingerprint.
+
+    Pre-sets Google consent cookies so the EU consent dialog at
+    consent.google.com is never shown (critical for servers located in
+    Europe, e.g. Contabo Germany).
+    """
     browser = await p.chromium.launch(
         headless=settings.playwright_headless,
         args=CHROMIUM_ARGS,
@@ -103,8 +111,26 @@ async def _create_browser_context(
     context = await browser.new_context(
         viewport={"width": 1280, "height": 900},
         locale="en-US",
+        timezone_id="America/New_York",
         user_agent=random.choice(USER_AGENTS),
     )
+
+    # Pre-set consent cookies to bypass EU consent dialog
+    await context.add_cookies([
+        {
+            "name": "CONSENT",
+            "value": "YES+cb.20210720-07-p0.en+FX+410",
+            "domain": ".google.com",
+            "path": "/",
+        },
+        {
+            "name": "SOCS",
+            "value": "CAISHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzIaAmVuIAEaBgiAo_CmBg",
+            "domain": ".google.com",
+            "path": "/",
+        },
+    ])
+
     return browser, context
 
 
@@ -141,29 +167,112 @@ async def _scroll_results_panel(page: Page, max_scrolls: int = 5) -> None:
 
 
 async def _handle_consent_dialog(page: Page) -> None:
-    """Best-effort consent acceptance across page and iframe variants."""
-    consent_texts = ("Accept all", "I agree", "Agree", "Accept")
+    """Dismiss Google's EU consent dialog if it appears.
 
-    for text in consent_texts:
-        try:
-            btn = page.locator(f'button:has-text("{text}")')
-            if await btn.count() > 0:
-                await btn.first.click(timeout=2000)
-                await asyncio.sleep(1.0)
-                return
-        except Exception:
-            pass
-
-    for frame in page.frames:
+    Tries multiple strategies in order:
+    1. Click a known consent button (English + German variants)
+    2. Try the same inside iframes
+    3. Submit the consent form directly via JS
+    4. Re-inject consent cookies and re-navigate
+    """
+    if "consent.google.com" not in page.url:
+        # Also check for in-page consent overlays on maps
+        consent_texts = ("Accept all", "I agree", "Agree", "Accept")
         for text in consent_texts:
             try:
-                btn = frame.locator(f'button:has-text("{text}")')
+                btn = page.locator(f'button:has-text("{text}")')
                 if await btn.count() > 0:
                     await btn.first.click(timeout=2000)
                     await asyncio.sleep(1.0)
                     return
             except Exception:
                 pass
+        return
+
+    logger.info("Google consent page detected at %s — attempting to dismiss", page.url)
+
+    # Save original Maps URL from the redirect query string
+    original_url = page.url
+    continue_match = re.search(r"continue=([^&]+)", original_url)
+    original_maps_url = (
+        urllib.parse.unquote(continue_match.group(1)) if continue_match else None
+    )
+
+    # Strategy 1: Click consent buttons (English + German + CSS selectors)
+    consent_selectors = [
+        'button:has-text("Accept all")',
+        'button:has-text("Reject all")',
+        'button:has-text("Alle akzeptieren")',
+        'button:has-text("Alle ablehnen")',
+        '[aria-label="Accept all"]',
+        '[aria-label="Reject all"]',
+        '#L2AGLb',
+        '.VfPpkd-LgbsSe',
+        'form[action*="consent"] button',
+    ]
+
+    for selector in consent_selectors:
+        try:
+            btn = page.locator(selector)
+            if await btn.count() > 0:
+                await btn.first.click(timeout=3000)
+                logger.info("Clicked consent button: %s", selector)
+                await asyncio.sleep(3.0)
+                if "consent.google.com" not in page.url:
+                    return
+        except Exception:
+            continue
+
+    # Strategy 2: Try inside iframes
+    for frame in page.frames:
+        for selector in consent_selectors:
+            try:
+                btn = frame.locator(selector)
+                if await btn.count() > 0:
+                    await btn.first.click(timeout=3000)
+                    logger.info("Clicked consent button in iframe: %s", selector)
+                    await asyncio.sleep(3.0)
+                    if "consent.google.com" not in page.url:
+                        return
+            except Exception:
+                continue
+
+    # Strategy 3: Submit the consent form via JavaScript
+    if "consent.google.com" in page.url:
+        logger.info("Trying form submit to bypass consent page")
+        try:
+            await page.evaluate("""
+                const forms = document.querySelectorAll('form');
+                for (const form of forms) {
+                    if (form.action && form.action.includes('consent')) {
+                        form.submit();
+                        break;
+                    }
+                }
+            """)
+            await asyncio.sleep(3.0)
+        except Exception:
+            pass
+
+    # Strategy 4: Re-inject cookies and navigate directly
+    if "consent.google.com" in page.url and original_maps_url:
+        logger.warning("Could not dismiss consent dialog, re-injecting cookies and retrying")
+        await page.context.add_cookies([
+            {
+                "name": "CONSENT",
+                "value": "YES+cb.20210720-07-p0.en+FX+410",
+                "domain": ".google.com",
+                "path": "/",
+            },
+            {
+                "name": "SOCS",
+                "value": "CAISHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzIaAmVuIAEaBgiAo_CmBg",
+                "domain": ".google.com",
+                "path": "/",
+            },
+        ])
+        await page.goto(original_maps_url, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(3.0)
 
 
 async def _extract_listings_from_feed(page: Page) -> list[dict]:
@@ -427,6 +536,14 @@ async def _scrape_single_cell(
 
             # Handle consent dialog (including iframe variants).
             await _handle_consent_dialog(page)
+
+            # Verify we landed on Google Maps, not consent or captcha
+            current_url = page.url
+            if "consent" in current_url or "sorry" in current_url:
+                logger.error(
+                    "Failed to bypass consent/captcha page: %s", current_url,
+                )
+                return [], 1
 
             # Wait for results
             try:
