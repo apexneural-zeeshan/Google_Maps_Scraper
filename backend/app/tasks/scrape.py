@@ -252,6 +252,60 @@ def _store_leads(job_id: str, unique_leads: list[dict]) -> int:
     return stored
 
 
+def _update_leads_enrichment(job_id: str, enriched_dicts: list[dict]) -> int:
+    """UPDATE existing leads in-place with enrichment data.
+
+    Instead of delete+re-insert (which can lose data), this finds each lead
+    by (job_id, place_id) and updates only the enrichment columns.
+    """
+    enrichment_fields = (
+        "primary_email", "emails", "social_links", "owner_name",
+        "employee_count", "year_established", "business_age_years",
+        "description", "verified", "reviews_per_score",
+        "business_status", "phone", "website",
+    )
+
+    job_uuid = uuid.UUID(job_id)
+    updated = 0
+    session = _get_sync_session()
+    try:
+        for lead_data in enriched_dicts:
+            # Build a dict of only non-None enrichment values
+            values: dict = {}
+            for field in enrichment_fields:
+                val = lead_data.get(field)
+                if val is not None:
+                    values[field] = val
+
+            if not values:
+                continue
+
+            place_id = lead_data.get("place_id", "")
+            if not place_id:
+                continue
+
+            result = session.execute(
+                update(Lead)
+                .where(Lead.job_id == job_uuid, Lead.place_id == place_id)
+                .values(**values)
+            )
+            if result.rowcount > 0:
+                updated += 1
+
+        session.commit()
+        logger.info(
+            "Enrichment UPDATE: %d/%d leads updated for job %s",
+            updated, len(enriched_dicts), job_id,
+        )
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+    return updated
+
+
 def _delete_job_leads(job_id: str) -> int:
     """Delete all leads for a job. Returns count deleted."""
     session = _get_sync_session()
@@ -746,10 +800,11 @@ def run_layer3_outscraper(self, job_id: str) -> dict:
 
         enriched_leads = _run_async(enrich_leads(existing_leads))
 
-        _update_job(job_id, progress=95, current_step="Storing enriched results")
+        _update_job(job_id, progress=95, current_step="Saving enrichment data")
 
-        _delete_job_leads(job_id)
-        stored_count = _store_leads(job_id, enriched_leads)
+        # UPDATE existing leads in-place instead of delete+re-insert.
+        # This preserves all existing data and only writes enrichment fields.
+        updated_count = _update_leads_enrichment(job_id, enriched_leads)
 
         now = datetime.now(timezone.utc)
         elapsed = time.monotonic() - start_time
@@ -758,14 +813,13 @@ def run_layer3_outscraper(self, job_id: str) -> dict:
             layer3_status=LayerStatus.COMPLETED.value,
             layer3_completed_at=now,
             current_step=None,
-            total_unique=stored_count,
         )
 
         _update_overall_status(job_id)
 
         logger.info(
-            "Job %s Layer3: COMPLETED — %d leads in %s",
-            job_id, stored_count, _format_duration(elapsed),
+            "Job %s Layer3: COMPLETED — %d leads enriched in %s",
+            job_id, updated_count, _format_duration(elapsed),
         )
 
         job_data_fresh = _read_job(job_id)
@@ -777,7 +831,7 @@ def run_layer3_outscraper(self, job_id: str) -> dict:
 
         return {
             "job_id": job_id, "layer": "outscraper",
-            "status": "completed", "total_enriched": stored_count,
+            "status": "completed", "total_enriched": updated_count,
         }
 
     except Exception as e:
