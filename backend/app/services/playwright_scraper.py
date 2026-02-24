@@ -47,7 +47,16 @@ CHROMIUM_ARGS = [
     "--disable-translate",
     "--no-first-run",
     "--disable-features=site-per-process",
+    "--js-flags=--max-old-space-size=256",
 ]
+
+# JavaScript injected into every page to hide automation signals
+_STEALTH_SCRIPT = """\
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+window.chrome = {runtime: {}};
+"""
 
 # Retry config per grid cell
 MAX_CELL_RETRIES = 3
@@ -130,6 +139,9 @@ async def _create_browser_context(
             "path": "/",
         },
     ])
+
+    # Inject stealth script to hide automation signals
+    await context.add_init_script(_STEALTH_SCRIPT)
 
     return browser, context
 
