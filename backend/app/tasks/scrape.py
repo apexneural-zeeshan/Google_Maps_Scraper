@@ -26,6 +26,7 @@ from app.db.session import sync_engine
 from app.models.job import Batch, Job, JobStatus, LayerStatus
 from app.models.lead import Lead
 from app.services.dedup import deduplicate
+from app.services.email_scraper import extract_contact_from_website
 from app.services.geocoder import geocode_location
 from app.services.grid import generate_grid
 from app.services.outscraper_api import enrich_leads
@@ -304,6 +305,63 @@ def _update_leads_enrichment(job_id: str, enriched_dicts: list[dict]) -> int:
         session.close()
 
     return updated
+
+
+def _scrape_emails_from_websites(leads: list[dict]) -> list[dict]:
+    """Scrape emails and social links from business websites.
+
+    Processes leads in batches of 5 concurrently to avoid overwhelming
+    target servers. Returns only leads that gained new data.
+    """
+    batch_size = 5
+    enriched: list[dict] = []
+
+    async def _scrape_batch(batch: list[dict]) -> None:
+        tasks = [
+            extract_contact_from_website(lead["website"])
+            for lead in batch
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for lead, contact in zip(batch, results):
+            if isinstance(contact, Exception):
+                continue
+            if not isinstance(contact, dict):
+                continue
+
+            changed = False
+            if contact.get("primary_email") and not lead.get("primary_email"):
+                lead["primary_email"] = contact["primary_email"]
+                changed = True
+            if contact.get("emails") and not lead.get("emails"):
+                emails_list = contact["emails"]
+                lead["emails"] = {
+                    "primary": emails_list[0],
+                    "secondary": emails_list[1:] if len(emails_list) > 1 else [],
+                }
+                changed = True
+            if contact.get("social_links") and not lead.get("social_links"):
+                lead["social_links"] = contact["social_links"]
+                changed = True
+
+            if changed:
+                enriched.append(lead)
+
+    for i in range(0, len(leads), batch_size):
+        batch = leads[i:i + batch_size]
+        _run_async(_scrape_batch(batch))
+
+        if (i + batch_size) % 25 == 0:
+            logger.info(
+                "Email scraping progress: %d/%d websites",
+                min(i + batch_size, len(leads)), len(leads),
+            )
+
+    logger.info(
+        "Email scraping complete: %d/%d leads enriched from websites",
+        len(enriched), len(leads),
+    )
+    return enriched
 
 
 def _delete_job_leads(job_id: str) -> int:
@@ -763,26 +821,21 @@ def run_layer2_serpapi(self, job_id: str) -> dict:
     bind=True, name="run_layer3_outscraper", max_retries=1,
 )
 def run_layer3_outscraper(self, job_id: str) -> dict:
-    """Layer 3: Outscraper — enriches leads with email/social."""
+    """Layer 3: Enrichment — Outscraper API + website email scraping.
+
+    Two-phase enrichment:
+    1. Outscraper API (if key configured) — adds email/social from their DB.
+    2. Website email scraping (always) — visits business websites to extract
+       email addresses and social media links for leads still missing them.
+    """
     start_time = time.monotonic()
 
     try:
-        if not settings.outscraper_api_key:
-            _update_job(
-                job_id,
-                layer3_status=LayerStatus.FAILED.value,
-                error_message="Outscraper API key not configured",
-            )
-            return {
-                "job_id": job_id, "layer": "outscraper",
-                "status": "failed", "error": "No API key",
-            }
-
         _update_job(
             job_id,
             layer3_status=LayerStatus.RUNNING.value,
             status=JobStatus.ENRICHING.value,
-            current_step="Enriching with Outscraper",
+            current_step="Enriching leads",
             progress=85,
         )
 
@@ -798,13 +851,42 @@ def run_layer3_outscraper(self, job_id: str) -> dict:
 
         logger.info("Job %s Layer3: enriching %d leads", job_id, len(existing_leads))
 
-        enriched_leads = _run_async(enrich_leads(existing_leads))
+        # Phase 1: Outscraper API (if key configured)
+        if settings.outscraper_api_key:
+            _update_job(job_id, current_step="Phase 1: Outscraper API enrichment")
+            existing_leads = _run_async(enrich_leads(existing_leads))
+            _update_leads_enrichment(job_id, existing_leads)
+        else:
+            logger.info("Job %s Layer3: Outscraper key not set, skipping API enrichment", job_id)
 
-        _update_job(job_id, progress=95, current_step="Saving enrichment data")
+        # Phase 2: Website email scraping for leads still missing email/social
+        _update_job(job_id, progress=90, current_step="Phase 2: Scraping emails from websites")
 
-        # UPDATE existing leads in-place instead of delete+re-insert.
-        # This preserves all existing data and only writes enrichment fields.
-        updated_count = _update_leads_enrichment(job_id, enriched_leads)
+        leads_needing_email = [
+            lead for lead in existing_leads
+            if not lead.get("primary_email")
+            and lead.get("website")
+            and lead["website"].startswith("http")
+        ]
+
+        logger.info(
+            "Job %s Layer3: %d/%d leads need website email scraping",
+            job_id, len(leads_needing_email), len(existing_leads),
+        )
+
+        if leads_needing_email:
+            email_enriched = _scrape_emails_from_websites(leads_needing_email)
+            if email_enriched:
+                _update_leads_enrichment(job_id, email_enriched)
+
+        _update_job(job_id, progress=95, current_step="Finalizing enrichment")
+
+        # Re-read to get accurate count
+        final_leads = _read_existing_leads(job_id)
+        enriched_count = sum(
+            1 for lead in final_leads
+            if lead.get("primary_email") or lead.get("social_links")
+        )
 
         now = datetime.now(timezone.utc)
         elapsed = time.monotonic() - start_time
@@ -818,8 +900,8 @@ def run_layer3_outscraper(self, job_id: str) -> dict:
         _update_overall_status(job_id)
 
         logger.info(
-            "Job %s Layer3: COMPLETED — %d leads enriched in %s",
-            job_id, updated_count, _format_duration(elapsed),
+            "Job %s Layer3: COMPLETED — %d/%d leads have email/social in %s",
+            job_id, enriched_count, len(final_leads), _format_duration(elapsed),
         )
 
         job_data_fresh = _read_job(job_id)
@@ -831,7 +913,7 @@ def run_layer3_outscraper(self, job_id: str) -> dict:
 
         return {
             "job_id": job_id, "layer": "outscraper",
-            "status": "completed", "total_enriched": updated_count,
+            "status": "completed", "total_enriched": enriched_count,
         }
 
     except Exception as e:
@@ -876,12 +958,18 @@ def run_batch(self, batch_id: str) -> dict:
     """
     start_time = time.monotonic()
 
-    # Read batch info
+    # Read batch info (use one_or_none to avoid NoResultFound crash)
     session = _get_sync_session()
     try:
         batch = session.query(Batch).filter(
             Batch.id == uuid.UUID(batch_id),
-        ).one()
+        ).one_or_none()
+        if not batch:
+            logger.error("Batch %s not found in database", batch_id)
+            return {
+                "batch_id": batch_id, "status": "failed",
+                "error": "Batch not found",
+            }
         jobs_q = (
             session.query(Job)
             .filter(Job.batch_id == batch.id)

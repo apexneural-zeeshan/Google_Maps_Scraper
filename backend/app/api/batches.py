@@ -70,14 +70,17 @@ async def create_batch(
     for job in jobs:
         await db.refresh(job)
 
+    # CRITICAL: commit BEFORE dispatching Celery task so the worker
+    # can find the batch and job rows in the database.
+    await db.commit()
+
     # Dispatch batch processing task
     from app.tasks.scrape import run_batch
 
     task = run_batch.delay(str(batch.id))
     batch.celery_task_id = task.id
     batch.status = "running"
-    await db.flush()
-    await db.refresh(batch)
+    await db.commit()
 
     logger.info(
         "Created batch %s (%s) with %d jobs, task %s",

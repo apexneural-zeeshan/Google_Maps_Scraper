@@ -199,6 +199,51 @@ async def cancel_job(
     return job
 
 
+@router.post(
+    "/{job_id}/retry",
+    response_model=JobResponse,
+    summary="Retry a failed or stuck job",
+    description="Re-dispatches Layer 1 (Playwright) for a failed or pending job.",
+)
+async def retry_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Job:
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    retryable = {
+        JobStatus.PENDING.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value,
+    }
+    if job.status not in retryable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry job with status '{job.status}'",
+        )
+
+    # Reset job state
+    job.status = JobStatus.PENDING.value
+    job.progress = 0
+    job.error_message = None
+    job.current_step = None
+    job.layer1_status = LayerStatus.IDLE.value
+    job.layer1_completed_at = None
+    await db.flush()
+
+    # Dispatch new Layer 1 task
+    from app.tasks.scrape import run_layer1_playwright
+
+    task = run_layer1_playwright.delay(str(job.id))
+    job.celery_task_id = task.id
+    await db.flush()
+    await db.refresh(job)
+
+    logger.info("Retried job %s with new task %s", job.id, task.id)
+    return job
+
+
 @router.delete(
     "/{job_id}",
     status_code=204,

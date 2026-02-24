@@ -196,6 +196,17 @@ async def _send_email(to: str, subject: str, html: str) -> None:
 
             if response.status_code in (200, 201):
                 logger.info("Email sent to %s: %s", to, subject)
+            elif response.status_code == 403:
+                error_body = response.text[:300]
+                if "verify a domain" in error_body.lower():
+                    logger.warning(
+                        "Resend domain not verified — cannot send to %s. "
+                        "Verify your domain at https://resend.com/domains "
+                        "to enable sending to all recipients.",
+                        to,
+                    )
+                else:
+                    logger.warning("Resend API 403 for %s: %s", to, error_body)
             else:
                 logger.warning(
                     "Resend API error %d: %s",
